@@ -1,0 +1,9 @@
+server:
+  transport: UDP
+  host: 127.0.0.1
+  port: 5080
+  timeout: 6
+
+db:
+  endpoints:
+    - http://localhost:2379

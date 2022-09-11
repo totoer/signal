@@ -1,0 +1,34 @@
+{
+    "/account/127.0.0.1:5080/test": {
+        "registration_type": "AUTH_REGISTRATION",
+        "login": "test",
+        "password": "test",
+        "incoming": null,
+        "outgoing": {
+            "id": "test",
+            "root_id": "test",
+            "programms": {
+                "test": "CALL_PROGRAMM"
+            }
+        }
+    },
+    "/account/127.0.0.1:5080/foo": {
+        "registration_type": "AUTH_REGISTRATION",
+        "login": "foo",
+        "password": "foo",
+        "incoming": null,
+        "outgoing": {
+            "id": "foo",
+            "root_id": "test",
+            "programms": {
+                "test": "CALL_PROGRAMM"
+            }
+        }
+    },
+    "/scenario/test/programm/test": {
+        "hold_media": ""
+    },
+    "/scenario/foo/programm/test": {
+        "hold_media": ""
+    }
+}
