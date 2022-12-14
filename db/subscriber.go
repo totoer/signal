@@ -1,8 +1,6 @@
 package db
 
 import (
-	"context"
-	"fmt"
 	"net"
 	"sync"
 
@@ -22,26 +20,26 @@ type Subscriber struct {
 	Addr    net.Addr `json:"addr"`
 }
 
-func (db *DB) CaptureSubscriber(ctx context.Context, id uuid.UUID) (*Subscriber, error) {
-	if session, err := concurrency.NewSession(db.client); err != nil {
-		return nil, err
-	} else {
-		s := &Subscriber{
-			db:      db,
-			ID:      id,
-			session: session,
-		}
-		key := fmt.Sprintf("/subscriber/%s", id.String())
-		s.L = concurrency.NewLocker(session, key)
-		s.L.Lock()
+// func (db *DB) CaptureSubscriber(ctx context.Context, id uuid.UUID) (*Subscriber, error) {
+// 	if session, err := concurrency.NewSession(db.client); err != nil {
+// 		return nil, err
+// 	} else {
+// 		s := &Subscriber{
+// 			db:      db,
+// 			ID:      id,
+// 			session: session,
+// 		}
+// 		key := fmt.Sprintf("/subscriber/%s", id.String())
+// 		s.L = concurrency.NewLocker(session, key)
+// 		s.L.Lock()
 
-		db.Get(ctx, key, s)
+// 		db.Get(ctx, key, s)
 
-		return s, nil
-	}
-}
+// 		return s, nil
+// 	}
+// }
 
-func (s *Subscriber) Save(ctx context.Context) error {
-	key := fmt.Sprintf("/subscriber/%s", s.ID.String())
-	return s.db.Put(ctx, key, s)
-}
+// func (s *Subscriber) Save(ctx context.Context) error {
+// 	key := fmt.Sprintf("/subscriber/%s", s.ID.String())
+// 	return s.db.Put(ctx, key, s)
+// }

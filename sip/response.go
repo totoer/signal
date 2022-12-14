@@ -4,12 +4,13 @@ import (
 	"bytes"
 	"fmt"
 	"net"
+	"signal/sdp"
 )
 
 type Response struct {
 	Code         ResponseCode
 	Headers      Headers
-	SDP          SDP
+	SDP          sdp.SDP
 	SourceAddres net.Addr
 	rawBody      string
 }

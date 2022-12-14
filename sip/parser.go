@@ -94,23 +94,6 @@ func (p *Parser) parseRequestLine() (MethodType, URI, error) {
 	}
 }
 
-func separateHeaderLine(v string) (string, string) {
-	key := make([]string, 0)
-	i := 0
-
-	for ii, r := range v {
-		s := string(r)
-		if s != ":" {
-			key = append(key, s)
-		} else {
-			i = ii + 1
-			break
-		}
-	}
-
-	return strings.TrimSpace(strings.Join(key, "")), strings.TrimSpace(v[i:])
-}
-
 func (p *Parser) PrepareFields() map[string][]Line {
 	fields := make(map[string][]Line)
 	for _, rawLine := range p.rawLines[1:] {
@@ -183,4 +166,16 @@ func NewParser(b string) *Parser {
 		rawBody:  b,
 		rawLines: strings.Split(strings.ReplaceAll(b, "\r\n", "\n"), "\n"),
 	}
+}
+
+func decodeFirseLine() {
+
+}
+
+func Decode(b string) {
+	b = strings.ReplaceAll(b, "\r\n", "\n")
+	parts := strings.Split(b, "\n\n")
+	lines := strings.Split(parts[0], "\n")
+
+	// lines := strings.Split(strings.ReplaceAll(b, "\r\n", "\n"), "\n")
 }

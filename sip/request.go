@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"net"
+	"signal/sdp"
 )
 
 type MethodType string
@@ -31,7 +32,7 @@ type Request struct {
 	Method       MethodType
 	URI          URI
 	Headers      Headers
-	SDP          SDP
+	SDP          sdp.SDP
 	SourceAddres net.Addr
 	rawBody      string
 }
@@ -59,9 +60,9 @@ func (req Request) GetSourceAddres() net.Addr {
 }
 
 func (req Request) GetRecipientAddrs() []string {
-	if contacts, err := req.GetHeaders().GetContacts(); err == nil {
+	if req.GetHeaders().Contacts != nil {
 		addrs := make([]string, 0)
-		for _, contact := range contacts {
+		for _, contact := range req.GetHeaders().Contacts {
 			addrs = append(addrs, contact.Address.URI.Host)
 		}
 		return addrs

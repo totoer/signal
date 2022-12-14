@@ -2,12 +2,79 @@ package sip
 
 import (
 	"bytes"
-	"errors"
 	"fmt"
 	"net"
 	"strconv"
 	"strings"
 )
+
+type RawHeader struct {
+	Value      string
+	Properties map[string]string
+}
+
+func prepareHeader(line string) (string, []RawHeader) {
+	keyBuffer := make([]string, 0)
+	i := 0
+
+	for ii, r := range line {
+		s := string(r)
+		if s != ":" {
+			keyBuffer = append(keyBuffer, s)
+		} else {
+			i = ii + 1
+			break
+		}
+	}
+
+	key := strings.TrimSpace(strings.Join(keyBuffer, ""))
+	value := strings.TrimSpace(line[i:])
+
+	rhs := make([]RawHeader, 0)
+
+	// Authorization: Digest username="Alice", realm="atlanta.com", nonce="84a4cc6f3082121f32b42a2187831a9e", response="7587245234b3434cc3412213e5f113a5432"
+	// WWW-Authenticate: Digest realm="atlanta.com", nonce="f84f1cec41e6cbe5aea9c8e88d359", algorithm=MD5
+	if key == "Authorization" || key == "WWW-Authenticate" {
+		rawValues := strings.Split(value, "Digest ")
+		parts := strings.Split(rawValues[0], ",")
+		props := make(map[string]string)
+		for _, part := range parts {
+			propParts := strings.Split(part, "=")
+			propKey := propParts[0]
+			propValue := propParts[1]
+			props[propKey] = strings.Trim(propValue, "\" ")
+		}
+		rhs = append(rhs, RawHeader{
+			Properties: props,
+		})
+		return key, rhs
+	} else {
+		parts := strings.Split(value, ",")
+		for _, part := range parts {
+			rawl := strings.Split(part, ";")
+			rh := RawHeader{
+				Value: rawl[0],
+			}
+			if len(rawl[1:]) > 0 {
+				props := make(map[string]string)
+				for _, prop := range rawl[1:] {
+					if strings.Count(prop, "=") > 0 {
+						propParts := strings.Split(prop, "=")
+						propKey := propParts[0]
+						propValue := strings.Trim(propParts[1], " \"")
+						props[propKey] = propValue
+					} else {
+						props[prop] = ""
+					}
+				}
+				rh.Properties = props
+			}
+			rhs = append(rhs, rh)
+		}
+
+		return key, rhs
+	}
+}
 
 type URI struct {
 	Login     string `json:"login"`
@@ -37,7 +104,7 @@ func (uri URI) GetAddr() net.Addr {
 	return &net.UDPAddr{}
 }
 
-func ParseURI(v string) (URI, error) {
+func DecodeURI(v string) (URI, error) {
 	uri := URI{
 		LR: false,
 	}
@@ -88,7 +155,7 @@ func (t Address) String() string {
 // "Bob" <sips:bob@biloxi.com>
 // sip:+12125551212@phone2net.com
 // Anonymous <sip:c8oqz84zk7z@privacy.org>
-func ParseTarget(v string) (Address, error) {
+func DecodeTarget(v string) (Address, error) {
 	var address Address
 	i := strings.Index(v, "<sip:")
 	if i == -1 {
@@ -103,7 +170,7 @@ func ParseTarget(v string) (Address, error) {
 		rawURI = v[i:]
 	}
 
-	if uri, err := ParseURI(rawURI); err != nil {
+	if uri, err := DecodeURI(rawURI); err != nil {
 		return address, err
 	} else {
 		address.URI = uri
@@ -121,6 +188,10 @@ func (ph PlainHeader) String() string {
 	return string(ph.Value)
 }
 
+func decodePlainHeader(rh RawHeader) (PlainHeader, error) {
+	return PlainHeader{rh.Value, rh.Properties}, nil
+}
+
 type IntegerHeader struct {
 	Value      int
 	Properties map[string]string
@@ -128,6 +199,14 @@ type IntegerHeader struct {
 
 func (ih IntegerHeader) String() string {
 	return strconv.Itoa(int(ih.Value))
+}
+
+func decodeIntegerHeader(rh RawHeader) (IntegerHeader, error) {
+	if v, err := strconv.Atoi(rh.Value); err != nil {
+		return IntegerHeader{}, err
+	} else {
+		return IntegerHeader{v, rh.Properties}, nil
+	}
 }
 
 type Destination struct {
@@ -144,6 +223,178 @@ func (d Destination) String() string {
 	return builder.String()
 }
 
+func decodeDestinations(rh RawHeader) (Destination, error) {
+	if t, err := DecodeTarget(rh.Value); err != nil {
+		return Destination{}, err
+	} else {
+		return Destination{
+			Address: t,
+			Tag:     rh.Properties["tag"],
+		}, nil
+	}
+}
+
+type Via struct {
+	Host     string
+	Branch   string
+	Received string
+	Rport    bool
+}
+
+func (via Via) String() string {
+	var builder strings.Builder
+	builder.WriteString(fmt.Sprintf("SIP/2.0/UDP %s", via.Host))
+	if via.Branch != "" {
+		builder.WriteString(fmt.Sprintf(";branch=%s", via.Branch))
+	}
+	if via.Received != "" {
+		builder.WriteString(fmt.Sprintf(";received=%s", via.Received))
+	}
+	if via.Rport {
+		builder.WriteString(";rpotr")
+	}
+	return builder.String()
+}
+
+func decodeVia(rh RawHeader) (Via, error) {
+	via := Via{
+		Host: strings.TrimLeft(rh.Value, "Via: SIP/2.0/UDP "),
+	}
+
+	if branch, ok := rh.Properties["branch"]; ok {
+		via.Branch = branch
+	}
+
+	if received, ok := rh.Properties["received"]; ok {
+		via.Received = received
+	}
+
+	if _, ok := rh.Properties["rport"]; ok {
+		via.Rport = true
+	}
+
+	return via, nil
+}
+
+type Contact struct {
+	Address Address
+	Q       float64
+	Expires int
+}
+
+func (c Contact) String() string {
+	var builder strings.Builder
+	builder.WriteString(c.Address.String())
+	if c.Q != 0 {
+		builder.WriteString(fmt.Sprintf("%f", c.Q))
+	}
+	if c.Expires != 0 {
+		builder.WriteString(strconv.Itoa(c.Expires))
+	}
+	return builder.String()
+}
+
+// Contact: "Mr. Watson" <sip:watson@worcester.bell-telephone.com>;q=0.7; expires=3600
+func decodeContact(rh RawHeader) (Contact, error) {
+	var contact Contact
+	if address, err := DecodeTarget(rh.Value); err != nil {
+		return Contact{}, err
+	} else {
+		contact.Address = address
+	}
+	if rawQ, ok := rh.Properties["q"]; ok {
+		if q, err := strconv.ParseFloat(rawQ, 32); err != nil {
+			return Contact{}, err
+		} else {
+			contact.Q = q
+		}
+	}
+	return contact, nil
+}
+
+type CSeq struct {
+	Value  int
+	Method MethodType
+}
+
+func (cseq CSeq) String() string {
+	var builder strings.Builder
+	builder.WriteString(strconv.Itoa(cseq.Value))
+	builder.WriteString(" ")
+	builder.WriteString(string(cseq.Method))
+	return builder.String()
+}
+
+func decodeCSeq(rh RawHeader) (CSeq, error) {
+	parts := strings.Split(rh.Value, " ")
+	if v, err := strconv.Atoi(parts[0]); err != nil {
+		return CSeq{}, err
+	} else {
+		return CSeq{
+			Value:  v,
+			Method: MethodType(parts[1]),
+		}, nil
+	}
+}
+
+type Allow MethodType
+
+func (a Allow) String() string {
+	return string(a)
+}
+
+// Allow: INVITE, ACK, OPTIONS, CANCEL, BYE
+func decodeAllow(rh RawHeader) (Allow, error) {
+	v := strings.Trim(rh.Value, " ")
+	return Allow(v), nil
+}
+
+type Authorization struct {
+	Username string
+	Realm    string
+	Nonce    string
+	Response string
+}
+
+func (a *Authorization) String() string {
+	var builder strings.Builder
+	builder.WriteString("Digest ")
+	builder.WriteString(fmt.Sprintf("username=%s", a.Username))
+	builder.WriteString(fmt.Sprintf("realm=%s", a.Realm))
+	builder.WriteString(fmt.Sprintf("nonce=%s", a.Nonce))
+	builder.WriteString(fmt.Sprintf("response=%s", a.Response))
+	return builder.String()
+}
+
+// Authorization: Digest username="Alice", realm="atlanta.com", nonce="84a4cc6f3082121f32b42a2187831a9e", response="7587245234b3434cc3412213e5f113a5432"
+func decodeAuthorization(rh RawHeader) (Authorization, error) {
+	return Authorization{
+		Username: rh.Properties["username"],
+		Realm:    rh.Properties["realm"],
+		Nonce:    rh.Properties["nonce"],
+		Response: rh.Properties["response"],
+	}, nil
+}
+
+type WWWAuthenticate struct {
+	Realm     string
+	Nonce     string
+	Algorithm string
+}
+
+func (a *WWWAuthenticate) String() string {
+	return fmt.Sprintf("Digest realm=\"%s\", nonce=\"%s\", algorithm=\"%s\"", a.Realm, a.Nonce, a.Algorithm)
+}
+
+// WWW-Authenticate: Digest realm="atlanta.com", nonce="f84f1cec41e6cbe5aea9c8e88d359", algorithm=MD5
+func decodeWWWAuthenticate(rh RawHeader) (WWWAuthenticate, error) {
+	return WWWAuthenticate{
+		Realm:     rh.Properties["realm"],
+		Nonce:     rh.Properties["nonce"],
+		Algorithm: rh.Properties["algorithm"],
+	}, nil
+}
+
 type Headers struct {
 	Vias            []Via
 	From            *Destination
@@ -156,77 +407,9 @@ type Headers struct {
 	WWWAuthenticate *WWWAuthenticate
 	Authorization   *Authorization
 	ContentLength   *IntegerHeader
-	Lines           map[string][]Line
-	p               *Parser
 }
 
-var ErrHeaderFieldNotExists error = errors.New("header field not exists")
-
-func (hs *Headers) GetRawFields(key string) ([]Line, error) {
-	if hs.Lines == nil && hs.p != nil {
-		hs.Lines = hs.p.PrepareFields()
-	} else if hs.p == nil {
-		hs.Lines = make(map[string][]Line)
-	}
-
-	if fields, ok := hs.Lines[key]; ok {
-		return fields, nil
-	}
-	return nil, ErrHeaderFieldNotExists
-}
-
-func (hs *Headers) parsePlainHeader(key string) ([]PlainHeader, error) {
-	if lines, err := hs.GetRawFields(key); err != nil {
-		return nil, err
-	} else {
-		headers := make([]PlainHeader, 0)
-		for _, line := range lines {
-			headers = append(headers, PlainHeader{line.Value, line.Properties})
-		}
-		return headers, nil
-	}
-}
-
-func (hs *Headers) GetPlainHeaders(key string) ([]PlainHeader, error) {
-	return hs.parsePlainHeader(key)
-}
-
-func (hs *Headers) parseIntegerHeader(key string) ([]IntegerHeader, error) {
-	if lines, err := hs.GetRawFields(key); err != nil {
-		return nil, err
-	} else {
-		headers := make([]IntegerHeader, 0)
-		for _, line := range lines {
-			if v, err := strconv.Atoi(line.Value); err != nil {
-				return nil, err
-			} else {
-				headers = append(headers, IntegerHeader{v, line.Properties})
-			}
-		}
-		return headers, nil
-	}
-}
-
-func (hs *Headers) GetIntegerHeaders(key string) ([]IntegerHeader, error) {
-	return hs.parseIntegerHeader(key)
-}
-
-func (hs *Headers) parseDestination(key string) (Destination, error) {
-	if lines, err := hs.GetRawFields(key); err != nil {
-		return Destination{}, err
-	} else {
-		if t, err := ParseTarget(lines[0].Value); err != nil {
-			return Destination{}, err
-		} else {
-			return Destination{
-				Address: t,
-				Tag:     lines[0].Properties["tag"],
-			}, nil
-		}
-	}
-}
-
-func (hs *Headers) Data() []byte {
+func (hs *Headers) Encode() []byte {
 	var buffer bytes.Buffer
 
 	if len(hs.Vias) != 0 {
@@ -307,9 +490,78 @@ func (hs *Headers) Data() []byte {
 	return buffer.Bytes()
 }
 
-func NewHeaders(p *Parser) Headers {
-	return Headers{
-		Lines: nil,
-		p:     p,
+func DecodeHeaders(lines []string) (*Headers, error) {
+	hs := &Headers{
+		Vias: make([]Via, 0),
 	}
+	for _, line := range lines {
+		key, rhs := prepareHeader(line)
+		for _, rh := range rhs {
+			switch key {
+			case "Via":
+				if via, err := decodeVia(rh); err != nil {
+					hs.Vias = append(hs.Vias, via)
+				}
+			case "From", "To":
+				if dist, err := decodeDestinations(rh); err != nil {
+					return nil, err
+				} else {
+					switch key {
+					case "From":
+						hs.From = &dist
+					case "To":
+						hs.To = &dist
+					}
+				}
+			case "Max-Forwards", "Content-Length":
+				if h, err := decodeIntegerHeader(rh); err != nil {
+					return nil, err
+				} else {
+					switch key {
+					case "Max-Forwards":
+						hs.MaxForwards = &h
+					case "Content-Length":
+						hs.ContentLength = &h
+					}
+				}
+			case "Call-ID":
+				if h, err := decodePlainHeader(rh); err != nil {
+					return nil, err
+				} else {
+					hs.CallID = &h
+				}
+			case "Contact":
+				if contact, err := decodeContact(rh); err != nil {
+					return nil, err
+				} else {
+					hs.Contacts = append(hs.Contacts, contact)
+				}
+			case "CSeq":
+				if cseq, err := decodeCSeq(rh); err != nil {
+					return nil, err
+				} else {
+					hs.CSeq = &cseq
+				}
+			case "Allow":
+				if allow, err := decodeAllow(rh); err != nil {
+					return nil, err
+				} else {
+					hs.Allows = append(hs.Allows, allow)
+				}
+			case "Authorization":
+				if auth, err := decodeAuthorization(rh); err != nil {
+					return nil, err
+				} else {
+					hs.Authorization = &auth
+				}
+			case "WWW-Authenticate":
+				if wwwauth, err := decodeWWWAuthenticate(rh); err != nil {
+					return nil, err
+				} else {
+					hs.WWWAuthenticate = &wwwauth
+				}
+			}
+		}
+	}
+	return hs, nil
 }

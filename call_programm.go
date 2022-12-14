@@ -73,9 +73,9 @@ func (cp *CallProgramm) onUASReady(ctx context.Context, uas *UAS) {
 		cp.uas.mediaChanal.Play()
 		cp.uac.mediaChanal.Beeps()
 	} else {
-		cp.uac.accept()
 		cp.uas.meeting.mediaMixer.Join(cp.uas.mediaChanal)
 		cp.uac.meeting.mediaMixer.Join(cp.uac.mediaChanal)
+		cp.uac.accept()
 	}
 }
 
